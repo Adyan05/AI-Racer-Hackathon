@@ -1,0 +1,16 @@
+{
+  "mean_reward": 4.666666574776173,
+  "median_reward": 4.666666574776173,
+  "std_reward": 0.0,
+  "mean_episode_length": 20.0,
+  "completion_rate": 0.0,
+  "episodes": [
+    {
+      "seed": 2026,
+      "reward": 4.666666574776173,
+      "length": 20,
+      "completed": false,
+      "lap_progress": 0.006666666666666667
+    }
+  ]
+}

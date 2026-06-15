@@ -4,13 +4,12 @@ import argparse
 import json
 from pathlib import Path
 
-from stable_baselines3 import PPO
-
 from .config import load_config
 from .evaluation import evaluate_model, save_evaluation
 from .plotting import plot_evaluations
 from .recording import record_episode
 from .training import train
+from .models import load_model
 
 
 def parser() -> argparse.ArgumentParser:
@@ -47,7 +46,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "train":
         print(train(config, resume=args.resume, run_dir=args.run_dir, visualize=args.visualize))
         return
-    model = PPO.load(args.model, device="cpu")
+    model = load_model(args.model, config, device="cpu")
     if args.command == "evaluate":
         result = evaluate_model(model, config)
         save_evaluation(result, args.output)

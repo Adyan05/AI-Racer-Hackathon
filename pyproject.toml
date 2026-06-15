@@ -11,6 +11,7 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
   "gymnasium[box2d]>=1.0,<2",
   "stable-baselines3>=2.4,<3",
+  "sb3-contrib>=2.8,<3",
   "torch>=2.2",
   "opencv-python>=4.9",
   "PyYAML>=6.0",
@@ -30,4 +31,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-

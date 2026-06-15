@@ -1,0 +1,3 @@
+#{"t_start": 1781524964.921534, "env_id": "CarRacing-v3"}
+r,l,t,lap_complete,lap_progress,reset_reason
+4.666667,20,4.350404,False,0.006666666666666667,time_limit

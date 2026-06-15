@@ -11,9 +11,10 @@ env:
   domain_randomize: false
   max_episode_steps: 1000
   terminate_off_track: true
-  off_track_grace_steps: 10
+  max_vehicle_off_track_fraction: 0.5
   off_track_penalty: -100.0
 train:
+  algorithm: ppo
   total_timesteps: 5000000
   device: cuda
   learning_rate: 0.00025

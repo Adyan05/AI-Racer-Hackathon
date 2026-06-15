@@ -54,3 +54,20 @@ class LiveHUDCallback(BaseCallback):
     def _update_learning_rate(self) -> None:
         learning_rate = float(self.model.lr_schedule(self.model._current_progress_remaining))
         self.training_env.env_method("set_learning_rate", learning_rate)
+
+
+class ContinuousSaveCallback(BaseCallback):
+    """Maintain one resumable model across repeated training sessions."""
+
+    def __init__(self, path: str | Path, frequency: int, verbose: int = 1):
+        super().__init__(verbose)
+        self.path = Path(path)
+        self.frequency = max(1, frequency)
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.frequency == 0:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.model.save(self.path)
+            if self.verbose:
+                print(f"Continuous model saved at {self.num_timesteps} steps: {self.path}.zip")
+        return True

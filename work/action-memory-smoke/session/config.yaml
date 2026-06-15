@@ -1,0 +1,56 @@
+run:
+  output_dir: work/action-memory-smoke
+  name: recurrent_circuit
+  continuous_name: session
+  seed: 42
+env:
+  id: CarRacing-v3
+  n_envs: 1
+  frame_stack: 4
+  image_size: 84
+  lap_complete_percent: 0.95
+  domain_randomize: false
+  fixed_track_seed: 2026
+  max_episode_steps: 30
+  terminate_off_track: true
+  max_vehicle_off_track_fraction: 0.5
+  off_track_penalty: -100.0
+  clearance_steering: true
+  clearance_steering_strength: 0.7
+  clearance_dead_zone: 0.02
+  clearance_turn_threshold: 0.05
+  probe_max_distance: 16.0
+  straight_gas: 0.8
+  soft_steering: 0.22
+  hard_steering: 0.65
+  segment_action_exploration: 0.1
+  curriculum_enabled: true
+  curriculum_segments: 20
+  curriculum_mastery_visits: 3
+  curriculum_review_interval: 4
+  curriculum_state_path: work\action-memory-smoke\session\curriculum.json
+train:
+  algorithm: recurrent_ppo
+  continuous_learning: true
+  continuous_save_freq: 32
+  total_timesteps: 64
+  device: cuda
+  learning_rate: 0.00025
+  n_steps: 32
+  batch_size: 32
+  n_epochs: 1
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  lstm_hidden_size: 256
+  checkpoint_freq: 25000
+eval:
+  frequency: 100000
+  seeds:
+  - 2026
+  target_mean_reward: 800.0
+  target_streak: 3
+  deterministic: true

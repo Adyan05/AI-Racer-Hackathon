@@ -21,9 +21,12 @@ def evaluate_model(model, config: dict[str, Any], seeds: list[int] | None = None
         complete = False
         progress = 0.0
         done = np.array([False])
+        state = None
+        episode_start = np.ones((1,), dtype=bool)
         while not done[0]:
-            action, _ = model.predict(observation, deterministic=config["eval"].get("deterministic", True))
+            action, state = model.predict(observation, state=state, episode_start=episode_start, deterministic=config["eval"].get("deterministic", True))
             observation, reward, done, infos = env.step(action)
+            episode_start = done
             total_reward += float(reward[0])
             length += 1
             progress = float(infos[0].get("lap_progress", progress))
@@ -46,4 +49,3 @@ def save_evaluation(result: dict[str, Any], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2), encoding="utf-8")
-

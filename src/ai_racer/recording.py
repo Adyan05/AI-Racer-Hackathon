@@ -19,11 +19,14 @@ def record_episode(model, config: dict[str, Any], output: str | Path, seed: int,
     writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
     total_reward, length, completed = 0.0, 0, False
     done = np.array([False])
+    state = None
+    episode_start = np.ones((1,), dtype=bool)
     try:
         while not done[0]:
             writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-            action, _ = model.predict(observation, deterministic=True)
+            action, state = model.predict(observation, state=state, episode_start=episode_start, deterministic=True)
             observation, reward, done, infos = env.step(action)
+            episode_start = done
             total_reward += float(reward[0])
             length += 1
             completed = bool(infos[0].get("lap_complete", completed))
@@ -32,4 +35,3 @@ def record_episode(model, config: dict[str, Any], output: str | Path, seed: int,
         writer.release()
         env.close()
     return {"seed": seed, "reward": total_reward, "length": length, "completed": completed, "video": str(output)}
-
