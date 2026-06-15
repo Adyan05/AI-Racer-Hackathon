@@ -1,0 +1,35 @@
+run:
+  output_dir: runs
+  name: ppo_carracing
+  seed: 42
+env:
+  id: CarRacing-v3
+  n_envs: 8
+  frame_stack: 4
+  image_size: 84
+  lap_complete_percent: 0.95
+  domain_randomize: false
+  max_episode_steps: 1000
+  terminate_off_track: true
+  off_track_grace_steps: 10
+  off_track_penalty: -100.0
+train:
+  total_timesteps: 5000000
+  device: cuda
+  learning_rate: 0.00025
+  n_steps: 512
+  batch_size: 256
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  checkpoint_freq: 100000
+eval:
+  frequency: 100000
+  seeds: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020]
+  target_mean_reward: 800.0
+  target_streak: 3
+  deterministic: true
