@@ -8,10 +8,10 @@ env:
   n_envs: 1
   frame_stack: 4
   image_size: 84
-  lap_complete_percent: 0.50
+  lap_complete_percent: 0.95
   domain_randomize: false
   fixed_track_seed: 2026
-  max_episode_steps: 5000
+  max_episode_steps: 1000
   terminate_off_track: true
   max_vehicle_off_track_fraction: 0.5
   off_track_penalty: -100.0
@@ -19,24 +19,12 @@ env:
   clearance_steering_strength: 0.7
   clearance_dead_zone: 0.02
   clearance_turn_threshold: 0.05
-  soft_turn_threshold: 0.10
-  hard_turn_threshold: 0.20
   probe_max_distance: 16.0
   straight_gas: 0.8
-  soft_steering: 0.22
-  hard_steering: 0.65
-  segment_action_exploration: 0.1
-  straight_target_speed: 12.0
-  soft_turn_target_speed: 9.0
-  hard_turn_target_speed: 6.5
-  max_gas: 0.35
-  max_brake: 0.6
-  absolute_max_speed: 20.0
   curriculum_enabled: true
   curriculum_segments: 20
   curriculum_mastery_visits: 3
   curriculum_review_interval: 4
-  curriculum_frontier_unlock_segment: 10
   curriculum_state_path: runs/continuous_circuit/curriculum.json
 train:
   algorithm: recurrent_ppo

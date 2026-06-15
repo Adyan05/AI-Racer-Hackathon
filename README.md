@@ -16,13 +16,7 @@ Run circuit learning on CUDA with the live probe display:
 ai-racer train --config configs/circuit.yaml --visualize
 ```
 
-This command now performs continuous learning. It reuses `runs/continuous_circuit/latest_model.zip` automatically across launches and saves it every 5,000 steps plus at normal shutdown. The fixed track is divided into 20 segments in `curriculum.json`: three successful reaches master the next segment. In the current phase, episodes start from the beginning until segment 10 is mastered, and an episode only ends when the car crashes or reaches the 50% lap-completion target.
-
-Each segment also remembers outcomes for `straight`, `soft_left`, `soft_right`, `hard_left`, and `hard_right`. Crossing into the next segment records the preceding action as successful; leaving the track records failure. Later episodes reuse the better-performing soft or hard turn for that segment, with 10% exploration so the controller can still discover improvements. Soft steering defaults to 0.22 and hard steering to 0.65.
-
-The current priority is track completion, not speed. The controller targets speed 12 on straights, 9 during soft turns, and 6.5 during hard turns, with gas capped at 0.35 and automatic braking above target. These values remain fixed; no speed curriculum is enabled yet. The opaque metrics panel is redrawn immediately on reset and every frame so it remains visible throughout training.
-
-Steering priority is deterministic: up to 2% ray difference stays straight; 2-10% applies a small soft correction; 10-20% uses soft left/right; above 20% uses hard left/right. Segment outcome memory may score these actions but cannot choose a hard turn below the 20% threshold. An absolute speed ceiling of 20 forces gas to zero and braking whenever exceeded.
+This command now performs continuous learning. It reuses `runs/continuous_circuit/latest_model.zip` automatically across launches and saves it every 5,000 steps plus at normal shutdown. The fixed track is divided into 20 segments in `curriculum.json`: three successful reaches master the next segment, most resets begin one segment before the learning frontier, and every fourth episode starts from the beginning to prevent forgetting earlier sections.
 
 The default fixed circuit is controlled by `env.fixed_track_seed`. Change that seed to learn a different circuit. Remove it or set it to `null` to return to randomly generated tracks.
 

@@ -36,19 +36,14 @@ class CircuitCurriculumWrapper(gym.Wrapper):
         segments: int = 20,
         mastery_visits: int = 3,
         review_interval: int = 4,
-        frontier_unlock_segment: int | None = None,
     ):
         super().__init__(env)
         self.state_path = Path(state_path)
         self.segments = segments
         self.mastery_visits = mastery_visits
         self.review_interval = review_interval
-        self.frontier_unlock_segment = (
-            segments // 2 if frontier_unlock_segment is None else int(frontier_unlock_segment)
-        )
         self.start_segment = 0
         self.episode_max_segment = 0
-        self.current_segment = 0
 
     def _default_state(self) -> dict[str, Any]:
         return {
@@ -56,7 +51,6 @@ class CircuitCurriculumWrapper(gym.Wrapper):
             "mastered_segment": 0,
             "segment_visits": {},
             "segment_failures": {},
-            "segment_actions": {},
         }
 
     def _load_state(self) -> dict[str, Any]:
@@ -79,12 +73,8 @@ class CircuitCurriculumWrapper(gym.Wrapper):
         state["episodes"] += 1
         mastered = int(state["mastered_segment"])
         review_episode = state["episodes"] % self.review_interval == 0
-        if mastered < self.frontier_unlock_segment:
-            self.start_segment = 0
-        else:
-            self.start_segment = 0 if review_episode else max(0, mastered - 1)
+        self.start_segment = 0 if review_episode else max(0, mastered - 1)
         self.episode_max_segment = self.start_segment
-        self.current_segment = self.start_segment
         base = self.env.unwrapped
         if self.start_segment > 0:
             start_tile = min(
@@ -102,7 +92,6 @@ class CircuitCurriculumWrapper(gym.Wrapper):
                 "curriculum_start_segment": self.start_segment,
                 "mastered_segment": mastered,
                 "curriculum_review_episode": review_episode,
-                "frontier_unlock_segment": self.frontier_unlock_segment,
             }
         )
         return observation, info
@@ -112,7 +101,6 @@ class CircuitCurriculumWrapper(gym.Wrapper):
         state = self._load_state()
         total_tiles = int(info.get("track_tiles", 1))
         segment = self._segment_for_tile(int(info.get("current_track_tile", 0)), total_tiles)
-        self.current_segment = segment
         if segment > self.episode_max_segment:
             visits = state["segment_visits"]
             for reached in range(self.episode_max_segment + 1, segment + 1):
@@ -138,22 +126,6 @@ class CircuitCurriculumWrapper(gym.Wrapper):
             }
         )
         return observation, reward, terminated, truncated, info
-
-    def action_success_rate(self, segment: int, action_name: str) -> tuple[float, int]:
-        state = self._load_state()
-        stats = state["segment_actions"].get(str(segment), {}).get(action_name, {})
-        successes = int(stats.get("successes", 0))
-        failures = int(stats.get("failures", 0))
-        attempts = successes + failures
-        return (successes + 1.0) / (attempts + 2.0), attempts
-
-    def record_action_outcome(self, segment: int, action_name: str, success: bool) -> None:
-        state = self._load_state()
-        segment_actions = state["segment_actions"].setdefault(str(segment), {})
-        stats = segment_actions.setdefault(action_name, {"successes": 0, "failures": 0})
-        key = "successes" if success else "failures"
-        stats[key] = int(stats.get(key, 0)) + 1
-        self._save_state(state)
 
 
 class GuidedObservation(gym.ObservationWrapper):
@@ -403,73 +375,21 @@ class LapInfoWrapper(gym.Wrapper):
 
 
 class ClearanceSteeringWrapper(gym.Wrapper):
-    """Use learned straight, soft-turn, and hard-turn actions per segment."""
+    """Blend steering and acceleration using fixed-range clearance rays."""
 
     def __init__(
         self,
         env: gym.Env,
         strength: float = 0.7,
         straight_threshold: float = 0.02,
-        soft_turn_threshold: float = 0.10,
-        hard_turn_threshold: float = 0.20,
+        turn_threshold: float = 0.05,
         straight_gas: float = 0.8,
-        soft_steering: float = 0.22,
-        hard_steering: float = 0.65,
-        exploration_rate: float = 0.1,
-        straight_target_speed: float = 12.0,
-        soft_turn_target_speed: float = 9.0,
-        hard_turn_target_speed: float = 6.5,
-        max_gas: float = 0.35,
-        max_brake: float = 0.6,
-        absolute_max_speed: float = 20.0,
     ):
         super().__init__(env)
         self.strength = float(np.clip(strength, 0.0, 1.0))
         self.straight_threshold = max(float(straight_threshold), 0.0)
-        self.soft_turn_threshold = max(float(soft_turn_threshold), self.straight_threshold)
-        self.hard_turn_threshold = max(float(hard_turn_threshold), self.soft_turn_threshold)
+        self.turn_threshold = max(float(turn_threshold), self.straight_threshold)
         self.straight_gas = float(np.clip(straight_gas, 0.0, 1.0))
-        self.soft_steering = float(np.clip(soft_steering, 0.0, 1.0))
-        self.hard_steering = float(np.clip(hard_steering, self.soft_steering, 1.0))
-        self.exploration_rate = float(np.clip(exploration_rate, 0.0, 1.0))
-        self.straight_target_speed = straight_target_speed
-        self.soft_turn_target_speed = soft_turn_target_speed
-        self.hard_turn_target_speed = hard_turn_target_speed
-        self.max_gas = float(np.clip(max_gas, 0.0, 1.0))
-        self.max_brake = float(np.clip(max_brake, 0.0, 1.0))
-        self.absolute_max_speed = max(float(absolute_max_speed), 0.0)
-        self.manual_max_speed = self.absolute_max_speed
-        self.previous_segment = 0
-        self.previous_action_name = "straight"
-
-    def reset(self, **kwargs):
-        observation, info = self.env.reset(**kwargs)
-        self.previous_segment = int(info.get("curriculum_start_segment", 0))
-        self.previous_action_name = "straight"
-        return observation, info
-
-    def set_manual_max_speed(self, value: float) -> None:
-        self.manual_max_speed = float(np.clip(value, 0.0, 100.0))
-
-    def get_manual_max_speed(self) -> float:
-        return self.manual_max_speed
-
-    def _learned_turn(self, segment: int, direction: float, difference: float) -> tuple[float, str]:
-        side = "right" if direction > 0.0 else "left"
-        soft_name = f"soft_{side}"
-        hard_name = f"hard_{side}"
-        try:
-            success_rate = self.env.get_wrapper_attr("action_success_rate")
-            soft_rate, soft_attempts = success_rate(segment, soft_name)
-            hard_rate, hard_attempts = success_rate(segment, hard_name)
-        except AttributeError:
-            soft_rate, soft_attempts = 0.5, 0
-            hard_rate, hard_attempts = 0.5, 0
-        use_hard = difference > self.hard_turn_threshold
-        if not use_hard and soft_attempts + hard_attempts >= 4 and np.random.random() < self.exploration_rate:
-            use_hard = hard_rate > soft_rate and difference >= self.hard_turn_threshold
-        magnitude = self.hard_steering if use_hard else self.soft_steering
-        return direction * magnitude, hard_name if use_hard else soft_name
 
     def _clearance_target(self) -> tuple[float, str, float]:
         left, right = self.env.get_wrapper_attr("probe_distances")
@@ -479,38 +399,12 @@ class ClearanceSteeringWrapper(gym.Wrapper):
         if relative_difference <= self.straight_threshold:
             return 0.0, "straight", relative_difference
         direction = 1.0 if difference > 0.0 else -1.0
-        if relative_difference < self.soft_turn_threshold:
-            correction = relative_difference / max(self.soft_turn_threshold, 1e-6)
-            return direction * self.soft_steering * 0.5 * correction, f"soft_{'right' if direction > 0.0 else 'left'}", relative_difference
-        try:
-            segment = int(self.env.get_wrapper_attr("current_segment"))
-        except AttributeError:
-            segment = 0
-        target, action_name = self._learned_turn(segment, direction, relative_difference)
-        return target, action_name, relative_difference
-
-    def _speed_control(self, action_name: str) -> tuple[float, float, float, float]:
-        speed = float(np.linalg.norm(self.env.unwrapped.car.hull.linearVelocity))
-        active_max_speed = min(self.absolute_max_speed, self.manual_max_speed)
-        if speed >= active_max_speed:
-            overspeed = speed - active_max_speed
-            brake = min(self.max_brake, 0.25 + overspeed / max(active_max_speed, 1e-6))
-            return 0.0, brake, speed, min(active_max_speed, self.straight_target_speed)
-        if action_name.startswith("hard_"):
-            target_speed = self.hard_turn_target_speed
-        elif action_name.startswith("soft_"):
-            target_speed = self.soft_turn_target_speed
-        else:
-            target_speed = self.straight_target_speed
-        target_speed = min(target_speed, active_max_speed)
-        error = target_speed - speed
-        if error > 0.0:
-            gas = min(self.max_gas, max(0.08, self.max_gas * error / max(target_speed, 1e-6)))
-            brake = 0.0
-        else:
-            gas = 0.0
-            brake = min(self.max_brake, self.max_brake * (-error) / max(target_speed, 1e-6))
-        return gas, brake, speed, target_speed
+        if relative_difference < self.turn_threshold:
+            transition = (relative_difference - self.straight_threshold) / max(
+                self.turn_threshold - self.straight_threshold, 1e-6
+            )
+            return direction * transition * self.turn_threshold, "correct", relative_difference
+        return direction * min(relative_difference, 1.0), "right" if direction > 0.0 else "left", relative_difference
 
     def step(self, action):
         requested = np.asarray(action, dtype=np.float32).copy()
@@ -521,22 +415,10 @@ class ClearanceSteeringWrapper(gym.Wrapper):
             -1.0,
             1.0,
         )
-        applied[1], applied[2], speed_before_action, target_speed = self._speed_control(decision)
+        if decision == "straight":
+            applied[1] = max(float(applied[1]), self.straight_gas)
+            applied[2] = 0.0
         observation, reward, terminated, truncated, info = self.env.step(applied)
-        current_segment = int(info.get("current_segment", self.previous_segment))
-        try:
-            record_outcome = self.env.get_wrapper_attr("record_action_outcome")
-            success_rate_for = self.env.get_wrapper_attr("action_success_rate")
-        except AttributeError:
-            record_outcome = None
-            success_rate_for = None
-        if record_outcome is not None and current_segment > self.previous_segment:
-            record_outcome(self.previous_segment, self.previous_action_name, True)
-        if record_outcome is not None and (terminated or truncated) and info.get("reset_reason") == "off_track":
-            record_outcome(current_segment, decision, False)
-        self.previous_segment = current_segment
-        self.previous_action_name = decision
-        success_rate, attempts = success_rate_for(current_segment, decision) if success_rate_for else (0.5, 0)
         info = dict(info)
         info.update(
             {
@@ -548,15 +430,6 @@ class ClearanceSteeringWrapper(gym.Wrapper):
                 "clearance_difference_percent": 100.0 * relative_difference,
                 "policy_gas": float(requested[1]),
                 "applied_gas": float(applied[1]),
-                "applied_brake": float(applied[2]),
-                "speed_before_action": speed_before_action,
-                "target_speed": target_speed,
-                "goal_priority": "finish_track",
-                "absolute_max_speed": self.absolute_max_speed,
-                "manual_max_speed": self.manual_max_speed,
-                "steering_action": decision,
-                "segment_action_success_rate": success_rate,
-                "segment_action_attempts": attempts,
             }
         )
         return observation, reward, terminated, truncated, info
@@ -569,42 +442,13 @@ class TrainingHUDWrapper(gym.Wrapper):
         super().__init__(env)
         self.learning_rate = 0.0
         self.episode_reward = 0.0
-        self.slider_dragging = False
-        self.slider_rect = pygame.Rect(0, 0, 240, 14)
 
     def reset(self, **kwargs):
         self.episode_reward = 0.0
-        observation, info = self.env.reset(**kwargs)
-        self._draw_hud(0.0, info)
-        return observation, info
+        return self.env.reset(**kwargs)
 
     def set_learning_rate(self, learning_rate: float) -> None:
         self.learning_rate = float(learning_rate)
-
-    @staticmethod
-    def _slider_value_from_mouse(mouse_x: int, slider_rect: pygame.Rect) -> float:
-        relative = np.clip((mouse_x - slider_rect.left) / max(slider_rect.width, 1), 0.0, 1.0)
-        return float(relative * 100.0)
-
-    @staticmethod
-    def _slider_knob_x(value: float, slider_rect: pygame.Rect) -> int:
-        normalized = np.clip(value / 100.0, 0.0, 1.0)
-        return int(round(slider_rect.left + normalized * slider_rect.width))
-
-    def _process_slider_events(self) -> None:
-        clearance = self.env.get_wrapper_attr("set_manual_max_speed")
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                continue
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if self.slider_rect.collidepoint(event.pos):
-                    self.slider_dragging = True
-                    clearance(self._slider_value_from_mouse(event.pos[0], self.slider_rect))
-            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                self.slider_dragging = False
-            elif event.type == pygame.MOUSEMOTION and self.slider_dragging:
-                clearance(self._slider_value_from_mouse(event.pos[0], self.slider_rect))
 
     @staticmethod
     def _direction(heading: float) -> str:
@@ -615,7 +459,6 @@ class TrainingHUDWrapper(gym.Wrapper):
         base = self.env.unwrapped
         if base.screen is None or base.surf is None:
             return
-        self._process_slider_events()
         risk = "SAFE"
         risk_color = (80, 220, 120)
         if not info.get("on_track", True):
@@ -627,10 +470,7 @@ class TrainingHUDWrapper(gym.Wrapper):
         font = pygame.font.Font(pygame.font.get_default_font(), 24)
         heading = float(info.get("heading_degrees", 0.0))
         lines = [
-            ("GOAL 1: FINISH TRACK", (100, 255, 120)),
             (f"Speed: {info.get('speed', 0.0):6.2f}", (255, 255, 255)),
-            (f"Target speed: {info.get('target_speed', 0.0):5.1f}", (255, 255, 255)),
-            (f"Max speed slider: {info.get('manual_max_speed', 0.0):5.1f} / 100", (255, 255, 255)),
             (f"Direction: {self._direction(heading)}  {heading:6.1f} deg", (255, 255, 255)),
             (f"Risk: {risk}", risk_color),
             (f"Reward: {reward:+7.2f}  Episode: {self.episode_reward:+8.2f}", (120, 220, 255)),
@@ -638,28 +478,14 @@ class TrainingHUDWrapper(gym.Wrapper):
             (f"Lap progress: {100.0 * info.get('lap_progress', 0.0):5.1f}%", (255, 255, 255)),
             (f"Rays L:{info.get('left_probe_distance', 0.0):.1f}m R:{info.get('right_probe_distance', 0.0):.1f}m -> {info.get('probe_decision', 'straight').upper()}", (255, 230, 80)),
             (f"Steer policy:{info.get('policy_steering', 0.0):+.2f} applied:{info.get('applied_steering', 0.0):+.2f}", (120, 255, 180)),
-            (f"Action:{info.get('steering_action', 'straight').upper()} diff:{info.get('clearance_difference_percent', 0.0):.1f}%", (120, 255, 180)),
-            (f"Gas:{info.get('applied_gas', 0.0):.2f} brake:{info.get('applied_brake', 0.0):.2f}", (120, 255, 180)),
+            (f"Mode:{info.get('clearance_decision', 'straight').upper()} diff:{info.get('clearance_difference_percent', 0.0):.1f}% gas:{info.get('applied_gas', 0.0):.2f}", (120, 255, 180)),
             (f"Curriculum:{info.get('current_segment', 0) + 1}/{info.get('curriculum_segments', 1)} mastered:{info.get('mastered_segment', 0) + 1}", (255, 180, 120)),
-            (f"Segment action score:{100.0 * info.get('segment_action_success_rate', 0.5):.0f}% ({info.get('segment_action_attempts', 0)} tries)", (255, 180, 120)),
         ]
-        panel = pygame.Surface((570, 380), pygame.SRCALPHA)
-        panel.fill((0, 0, 0, 245))
+        panel = pygame.Surface((540, 280), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 185))
         base.surf.blit(panel, (12, 12))
         for index, (text, color) in enumerate(lines):
             base.surf.blit(font.render(text, True, color), (24, 22 + index * 25))
-        self.slider_rect = pygame.Rect(base.surf.get_width() - 290, 28, 240, 14)
-        pygame.draw.rect(base.surf, (230, 230, 230), self.slider_rect, border_radius=7)
-        fill_width = max(1, int(self.slider_rect.width * info.get("manual_max_speed", 0.0) / 100.0))
-        pygame.draw.rect(
-            base.surf,
-            (100, 220, 255),
-            pygame.Rect(self.slider_rect.left, self.slider_rect.top, fill_width, self.slider_rect.height),
-            border_radius=7,
-        )
-        knob_x = self._slider_knob_x(float(info.get("manual_max_speed", 0.0)), self.slider_rect)
-        pygame.draw.circle(base.surf, (255, 180, 80), (knob_x, self.slider_rect.centery), 11)
-        base.surf.blit(font.render("Max speed", True, (255, 255, 255)), (self.slider_rect.left, self.slider_rect.top - 28))
         car_anchor = np.asarray((base.surf.get_width() // 2, 3 * base.surf.get_height() // 4 - 28), dtype=np.float32)
         zoom = 0.1 * 6.0 * max(1.0 - base.t, 0.0) + 2.7 * 6.0 * min(base.t, 1.0)
         probe_angle = np.deg2rad(28.0)
@@ -708,25 +534,14 @@ def make_single_env(
             segments=env_config.get("curriculum_segments", 20),
             mastery_visits=env_config.get("curriculum_mastery_visits", 3),
             review_interval=env_config.get("curriculum_review_interval", 4),
-            frontier_unlock_segment=env_config.get("curriculum_frontier_unlock_segment"),
         )
     if env_config.get("clearance_steering", False):
         env = ClearanceSteeringWrapper(
             env,
             strength=env_config.get("clearance_steering_strength", 0.7),
             straight_threshold=env_config.get("clearance_dead_zone", 0.02),
-            soft_turn_threshold=env_config.get("soft_turn_threshold", 0.10),
-            hard_turn_threshold=env_config.get("hard_turn_threshold", 0.20),
+            turn_threshold=env_config.get("clearance_turn_threshold", 0.05),
             straight_gas=env_config.get("straight_gas", 0.8),
-            soft_steering=env_config.get("soft_steering", 0.22),
-            hard_steering=env_config.get("hard_steering", 0.65),
-            exploration_rate=env_config.get("segment_action_exploration", 0.1),
-            straight_target_speed=env_config.get("straight_target_speed", 12.0),
-            soft_turn_target_speed=env_config.get("soft_turn_target_speed", 9.0),
-            hard_turn_target_speed=env_config.get("hard_turn_target_speed", 6.5),
-            max_gas=env_config.get("max_gas", 0.35),
-            max_brake=env_config.get("max_brake", 0.6),
-            absolute_max_speed=env_config.get("absolute_max_speed", 20.0),
         )
     if render_mode == "human":
         env = TrainingHUDWrapper(env)
